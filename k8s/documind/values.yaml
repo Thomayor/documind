@@ -1,0 +1,23 @@
+backend:
+  image:
+    repository: ghcr.io/thomayor/documind/backend
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "2Gi"
+      cpu: "1000m"
+
+postgres:
+  image: pgvector/pgvector:pg16
+  storage: 5Gi
+
+frontend:
+  image:
+    repository: ghcr.io/thomayor/documind/frontend
+    tag: "latest"
+  replicas: 1
