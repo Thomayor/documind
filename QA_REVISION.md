@@ -187,3 +187,81 @@ R :
 - **Cursor-based** : on passe l'ID de la dernière entrée vue. Le serveur retourne "tout ce qui vient après cet ID". Stable car l'ID ne change pas, même avec des insertions concurrentes. Utilisé par Twitter, Instagram pour le scroll infini.
 
 Pour DocuMind, `limit/offset` suffit — l'historique n'est pas modifié pendant la consultation.
+
+---
+
+## Étapes 17-18 — Tests unitaires et intégration
+
+**Q : Pourquoi mocker les repositories dans les tests unitaires ?**
+
+R : Un test unitaire teste une seule chose en isolation. Si le test de `QAService.ask()` fait une vraie requête PostgreSQL, on teste en fait QAService + ChunkRepository + la connexion DB + les migrations. Quand ça casse, on ne sait pas où. Le mock remplace le Repository par un objet qui retourne des données prédéfinies — le test ne teste que la logique de `QAService`, rien d'autre.
+
+```python
+# Le mock dit : "quand on appelle similarity_search, renvoie ces chunks"
+mock_chunk_repo.similarity_search.return_value = [(fake_chunk, 0.2)]
+```
+
+**Q : Pourquoi a-t-on une base de données séparée pour les tests ?**
+
+R : Les tests d'intégration insèrent et suppriment des données réelles. Si on utilisait la base de dev, les tests pourraient corrompre des données en cours d'utilisation, et les données de dev parasiteraient les assertions des tests. La base de test est créée vide avant chaque session, peuplée par les fixtures, puis nettoyée — chaque run repart d'un état propre.
+
+**Q : Qu'est-ce que `app.dependency_overrides` dans FastAPI ?**
+
+R : C'est le mécanisme de FastAPI pour remplacer une dépendance (comme `get_db`) par une autre dans les tests. Sans ça, chaque test ferait des requêtes sur la base de prod. Avec `dependency_overrides`, on dit "pour ce test, quand FastAPI demande `get_db`, donne-lui `get_test_db` à la place". Ça s'active/désactive sans modifier le code de production.
+
+---
+
+## Étape 19 — Logging, Middleware, Exceptions
+
+**Q : Quelle est la différence entre un Middleware et un Exception Handler dans FastAPI ?**
+
+R :
+- **Middleware** : enveloppe toutes les requêtes, même celles qui réussissent. S'exécute avant et après chaque handler. Notre `LoggingMiddleware` mesure la durée et log `METHOD PATH STATUS DURATIONms` pour chaque requête.
+- **Exception Handler** : s'active uniquement quand une exception non gérée remonte. Notre `unhandled_exception_handler` intercepte tout ce qui échappe aux routes et retourne `{"detail": "Erreur interne"}` proprement au lieu d'un crash 500 brut.
+
+Analogie : le Middleware est un douanier qui contrôle tout le monde à l'entrée et à la sortie. L'Exception Handler est l'équipe d'urgence qui intervient seulement quand quelque chose explose.
+
+---
+
+## Étapes 23-24 — CI/CD GitHub Actions
+
+### CI (Continuous Integration)
+
+**Q : Qu'est-ce que la CI et pourquoi ça tourne sur chaque PR ?**
+
+R : La CI est un pipeline automatisé qui vérifie qu'un changement de code ne casse rien. Elle s'exécute à chaque push ou PR sur un runner GitHub (une VM Ubuntu éphémère). Si elle échoue, le merge est bloqué. On ne merge jamais du code qui casse les tests.
+
+**Q : Pourquoi séparer lint, test et build en 3 jobs distincts ?**
+
+R : Deux raisons :
+1. **Feedback rapide** : si le lint échoue (style, imports manquants), on le sait en 10 secondes sans attendre les tests qui prennent 3 minutes.
+2. **Parallélisme** : des jobs indépendants tournent en parallèle sur des runners séparés. `build` dépend de `test` (`needs: test`), mais si on avait des jobs vraiment indépendants ils tourneraient simultanément.
+
+**Q : Comment la CI fait-elle tourner PostgreSQL ?**
+
+R : Via les `services` GitHub Actions. GitHub lance un conteneur `pgvector/pgvector:pg16` en parallèle du job, avec un healthcheck. Le job attend que le conteneur soit `healthy` avant de démarrer. C'est un vrai PostgreSQL, pas un mock — les tests d'intégration tournent sur une vraie base.
+
+```yaml
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    options: --health-cmd pg_isready  # attend que PG soit prêt
+```
+
+### CD (Continuous Deployment)
+
+**Q : Pourquoi tagger l'image Docker avec le SHA Git et pas `latest` ?**
+
+R : `latest` est écrasé à chaque push — impossible de savoir quelle version tourne en prod. Le SHA Git (`a3f9c12`) est unique et traçable : on peut faire `git show a3f9c12` pour voir exactement quel code est dans l'image. En cas de bug, on rollback vers le SHA précédent en une commande. ArgoCD utilise ce tag pour détecter qu'une nouvelle image est disponible et déclencher un redéploiement.
+
+**Q : Qu'est-ce que GHCR et pourquoi l'utiliser ?**
+
+R : GitHub Container Registry — le registry Docker intégré à GitHub. Avantages : pas de compte Docker Hub, `GITHUB_TOKEN` suffit pour l'authentification (pas de secret supplémentaire), les images sont liées au repo (accès, visibilité, suppression gérés avec le repo).
+
+**Q : Qu'est-ce que le principe GitOps que le CD implémente ?**
+
+R : Dans le GitOps, le repo Git est la **source de vérité unique** pour l'état de l'infrastructure. Au lieu de déployer directement sur le cluster (`kubectl apply`), le CD commit le nouveau tag d'image dans `k8s/documind/values.yaml`. ArgoCD surveille ce fichier et applique le changement automatiquement. Avantages : tout déploiement est auditable via `git log`, on peut rollback avec `git revert`, l'état du cluster est toujours en sync avec le repo.
+
+```
+Code merge → CI passe → CD build image → CD commit tag → ArgoCD détecte → Redéploiement auto
+```
