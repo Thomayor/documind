@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.v1.agent import router as agent_router
 from app.api.v1.documents import router as documents_router
 from app.api.v1.history import router as history_router
 from app.api.v1.qa import router as qa_router
@@ -33,6 +34,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(documents_router, prefix="/api/v1")
 app.include_router(qa_router, prefix="/api/v1")
+app.include_router(agent_router, prefix="/api/v1")
 app.include_router(history_router, prefix="/api/v1")
 
 

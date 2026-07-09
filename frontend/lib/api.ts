@@ -66,6 +66,16 @@ export const api = {
     return r.json();
   },
 
+  async agentAsk(question: string, document_id?: string): Promise<AskResponse> {
+    const r = await fetchWithTimeout(`${API_URL}/api/v1/agent/ask`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, document_id }),
+    }, 120000);
+    if (!r.ok) throw new Error("Erreur agent");
+    return r.json();
+  },
+
   async listHistory(skip = 0, limit = 20): Promise<HistoryEntry[]> {
     const r = await fetch(`${API_URL}/api/v1/history/?skip=${skip}&limit=${limit}`);
     if (!r.ok) throw new Error("Erreur lors du chargement de l'historique");

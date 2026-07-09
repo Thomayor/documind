@@ -29,8 +29,10 @@ class AskRequest(BaseModel):
 
 
 class SourceOut(BaseModel):
-    page_number: int | None
+    page_number: int | None = None
     preview: str
+    origin: str = "document"
+    url: str | None = None
 
 
 class AskResponse(BaseModel):
