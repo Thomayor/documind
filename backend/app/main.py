@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter, Histogram
 
 from app.api.v1.agent import router as agent_router
 from app.api.v1.documents import router as documents_router
@@ -12,16 +14,35 @@ from app.core.exceptions import unhandled_exception_handler
 from app.core.logging import setup_logging
 from app.core.middleware import LoggingMiddleware
 
+# Métriques custom
+rag_requests_total = Counter(
+    "documind_rag_requests_total",
+    "Nombre total de requêtes RAG",
+    ["source_type"],  # "document" | "web" | "none"
+)
+rag_latency_seconds = Histogram(
+    "documind_rag_latency_seconds",
+    "Latence du pipeline RAG en secondes",
+    buckets=[1, 5, 15, 30, 60, 90, 120, 180],
+)
+documents_ingested_total = Counter(
+    "documind_documents_ingested_total",
+    "Nombre total de documents ingérés",
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging(debug=settings.DEBUG)
     from app.rag.embedder import embedder
-    embedder.model  # charge le modèle au démarrage
+    embedder.model
     yield
 
 
 app = FastAPI(title="DocuMind", version="0.1.0", debug=settings.DEBUG, lifespan=lifespan)
+
+# Prometheus — expose /metrics
+Instrumentator().instrument(app).expose(app)
 
 app.add_middleware(LoggingMiddleware)
 app.add_middleware(

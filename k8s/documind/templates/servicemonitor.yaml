@@ -1,0 +1,14 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: documind-backend
+  labels:
+    release: kube-prometheus
+spec:
+  selector:
+    matchLabels:
+      app: documind-backend
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s
