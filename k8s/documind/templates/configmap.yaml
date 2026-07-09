@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: documind-config
+  labels:
+    app: documind
+data:
+  DEBUG: "false"
+  EMBEDDING_MODEL: "intfloat/multilingual-e5-base"
+  LLM_MODEL: "/app/models/Qwen2.5"

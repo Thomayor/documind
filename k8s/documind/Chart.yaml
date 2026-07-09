@@ -1,0 +1,6 @@
+apiVersion: v2
+name: documind
+description: Plateforme RAG pour interroger des documents avec un LLM local
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
