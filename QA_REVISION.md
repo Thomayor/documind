@@ -284,6 +284,86 @@ Les sources indiquent leur origine : `"document"` avec numéro de page, ou `"web
 
 ---
 
+## Étapes 25-27 — Kubernetes, Helm, ArgoCD
+
+**Q : Quelle est la différence entre Pod, ReplicaSet et Deployment ?**
+
+R :
+- **Pod** : unité de base — un ou plusieurs conteneurs qui partagent le même réseau et stockage. En pratique, toujours 1 conteneur par Pod.
+- **ReplicaSet** : garantit que N copies identiques d'un Pod tournent. Si un Pod crash, il en recrée un. Mais ne gère pas les mises à jour.
+- **Deployment** : orchestre les mises à jour au-dessus du ReplicaSet. Quand l'image change, il crée un nouveau ReplicaSet progressivement (rolling update) et réduit l'ancien à 0. `kubectl rollout undo` pour revenir en arrière. En pratique on ne touche jamais le ReplicaSet directement.
+
+```
+Deployment
+  └── ReplicaSet v2 (3 replicas) ← nouveau
+  └── ReplicaSet v1 (0 replicas) ← gardé pour rollback
+          └── Pod / Pod / Pod
+```
+
+**Q : À quoi sert un PersistentVolumeClaim (PVC) pour PostgreSQL ?**
+
+R : Un Pod est éphémère — s'il redémarre, son filesystem est réinitialisé. Sans PVC, toutes les données PostgreSQL sont perdues au redémarrage. Le PVC est une demande de stockage persistant : Kubernetes alloue un volume qui existe indépendamment du Pod. Les données survivent aux crashs et redémarrages.
+
+**Q : Quelle est la différence entre `kubectl apply` et Helm ?**
+
+R : `kubectl apply` applique des manifestes YAML bruts — c'est du copier-coller avec zéro réutilisabilité. Helm ajoute un système de **templating Go** (`{{ .Values.backend.image.tag }}`) et un `values.yaml` pour centraliser toutes les variables. Un seul `helm install documind ./k8s/documind` déploie tout. Pour changer l'image, on change `values.yaml` et `helm upgrade` — pas besoin de toucher aux 5 fichiers YAML.
+
+**Q : Qu'est-ce que GitOps et comment ArgoCD l'implémente ?**
+
+R : GitOps = le repo Git est la source de vérité unique pour l'état du cluster. On ne fait jamais `kubectl apply` manuellement en prod. À la place :
+
+1. Le pipeline CD commit le nouveau tag d'image dans `values.yaml`
+2. ArgoCD surveille le repo (polling toutes les 3 minutes)
+3. ArgoCD détecte la divergence entre l'état Git et l'état du cluster
+4. ArgoCD sync automatiquement → `helm upgrade` → nouveau Pod déployé
+
+Avantages : tout déploiement est auditable via `git log`, rollback = `git revert`, l'état du cluster est toujours lisible dans le repo.
+
+**Q : Qu'est-ce que `selfHeal: true` dans la config ArgoCD ?**
+
+R : Si quelqu'un modifie directement le cluster avec `kubectl` (en dehors de Git), ArgoCD détecte la divergence et **annule la modification** pour revenir à l'état Git. C'est la garantie que Git reste la source de vérité — personne ne peut "corriger manuellement" le cluster sans passer par Git.
+
+---
+
+## Étape 29 — Prometheus + Grafana
+
+**Q : Qu'est-ce que les 4 golden signals et lesquels mesure-t-on dans DocuMind ?**
+
+R : Les 4 golden signals (Google SRE Book) sont les métriques minimales pour surveiller n'importe quel service :
+
+| Signal | Métrique DocuMind | PromQL |
+|--------|------------------|--------|
+| **Latency** | Durée du pipeline RAG | `histogram_quantile(0.95, documind_rag_latency_seconds_bucket)` |
+| **Traffic** | Requêtes RAG par source | `rate(documind_rag_requests_total[5m])` |
+| **Errors** | Requêtes HTTP 5xx | `rate(http_requests_total{status=~"5.."}[5m])` |
+| **Saturation** | Mémoire et CPU du pod | métriques node-exporter |
+
+**Q : Quelle est la différence entre un Counter, un Gauge et un Histogram ?**
+
+R :
+- **Counter** : ne fait qu'augmenter. `documind_rag_requests_total` — le total de requêtes depuis le démarrage. On l'utilise avec `rate()` pour avoir un taux par seconde.
+- **Gauge** : peut monter et descendre. Mémoire utilisée, nombre de pods actifs. Snapshot à l'instant T.
+- **Histogram** : mesure la distribution d'une valeur. `documind_rag_latency_seconds` compte combien de requêtes tombent dans chaque bucket de temps. Permet de calculer p50/p95/p99 avec `histogram_quantile()`.
+
+**Q : Qu'est-ce qu'un ServiceMonitor et pourquoi en a-t-on besoin ?**
+
+R : Prometheus ne sait pas quoi scraper par défaut. Le ServiceMonitor est une Custom Resource Definition (CRD) qui dit à l'opérateur Prometheus : "surveille tous les Services avec ce label, sur ce port, à cet intervalle". Sans ServiceMonitor, il faudrait modifier la config Prometheus manuellement à chaque nouveau service. Avec, l'ajout d'un ServiceMonitor dans Helm suffit — Prometheus le découvre automatiquement.
+
+**Q : Comment lire une requête PromQL ?**
+
+R : Exemple concret :
+```promql
+histogram_quantile(0.95,
+  rate(documind_rag_latency_seconds_bucket[5m])
+)
+```
+Lecture : "donne-moi le 95e percentile de la latence RAG, calculé sur les 5 dernières minutes". Ça signifie que 95% des requêtes sont plus rapides que cette valeur — les 5% les plus lentes sont au-dessus.
+
+`rate(counter[5m])` = taux de variation moyen sur 5 minutes (indispensable pour les counters).
+`histogram_quantile(0.95, ...)` = percentile 95 d'un histogram.
+
+---
+
 ## Étapes 17-18 — Tests unitaires et intégration
 
 **Q : Pourquoi mocker les repositories dans les tests unitaires ?**
