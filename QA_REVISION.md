@@ -190,6 +190,100 @@ Pour DocuMind, `limit/offset` suffit — l'historique n'est pas modifié pendant
 
 ---
 
+## Étape 30 — Agent LangGraph avec fallback web
+
+### Concepts fondamentaux
+
+**Q : Quelle est la différence entre un pipeline RAG classique et un agent LangGraph ?**
+
+R : Un pipeline RAG classique est **linéaire et fixe** : toujours embed → search → generate, quoi qu'il arrive. Si la recherche ne trouve rien, il répond quand même avec un contexte vide.
+
+Un agent LangGraph est un **graphe de décision** : chaque nœud fait une action, et des arêtes conditionnelles décident quel nœud exécuter ensuite selon l'état. L'agent peut prendre des chemins différents selon les résultats.
+
+```
+Pipeline classique :  [embed] → [search] → [generate]  (toujours pareil)
+
+Agent LangGraph :     [retrieve]
+                          │
+                  chunks trouvés ? ──oui──→ [generate]
+                          │
+                         non
+                          ↓
+                     [web_search] → [generate]
+```
+
+**Q : Qu'est-ce que le `StateGraph` et le `AgentState` dans LangGraph ?**
+
+R : Le `StateGraph` est le graphe orienté qui définit les nœuds et les transitions. L'`AgentState` est un dictionnaire typé (`TypedDict`) qui représente l'état courant de l'agent — il est passé de nœud en nœud et chaque nœud peut le modifier.
+
+```python
+class AgentState(TypedDict):
+    question: str          # entrée initiale
+    chunks: list           # résultat du retrieve
+    web_results: list      # résultat du web_search
+    answer: str            # sortie finale
+    source_type: str       # "document" | "web" | "none"
+```
+
+Chaque nœud reçoit l'état complet et retourne un état mis à jour (`{**state, "chunks": chunks}`). LangGraph fusionne automatiquement les modifications.
+
+**Q : Qu'est-ce qu'une arête conditionnelle (`add_conditional_edges`) ?**
+
+R : C'est une fonction de routage qui examine l'état et retourne le nom du prochain nœud. Dans DocuMind :
+
+```python
+def should_search_web(state: AgentState) -> str:
+    if state["chunks"]:   # des résultats pertinents ont été trouvés
+        return "generate"
+    return "web_search"   # sinon on cherche sur le web
+```
+
+LangGraph appelle cette fonction après le nœud `retrieve` et redirige vers `generate` ou `web_search` selon le retour. C'est le cœur de la logique agentique — pas le LLM qui décide, mais du code Python déterministe.
+
+**Q : Pourquoi ne pas utiliser le LLM pour décider si on cherche sur le web ou non ?**
+
+R : On pourrait — c'est ce que font les agents "tool-calling" avec GPT-4 ou Claude. Mais Qwen2.5-1.5B n'est pas fiable pour le tool-calling (trop petit). Notre décision est **déterministe** : si `similarity_search` retourne 0 chunks pertinents (distance > 0.5), on va sur le web. Zéro ambiguïté, 100% prévisible.
+
+Dans un vrai système prod avec un LLM capable, on laisserait le LLM décider quand appeler quel outil. Ici on garde la logique explicite — c'est plus robuste avec un petit modèle.
+
+**Q : Quelle est la différence entre LangChain et LangGraph ?**
+
+R :
+- **LangChain** : boîte à outils pour chaîner des appels LLM, des parsers, des retrievers. Pense à des briques LEGO qu'on assemble en séquence. Bien pour un pipeline fixe.
+- **LangGraph** : framework pour construire des **graphes d'états** avec des boucles et des conditions. Conçu pour les agents qui prennent des décisions, retournent en arrière, appellent des outils plusieurs fois. LangGraph est construit au-dessus de LangChain.
+
+Pour DocuMind : on aurait pu faire le RAG avec LangChain en 10 lignes. Mais la logique "si pas de résultat → web" nécessite une branche conditionnelle → LangGraph.
+
+**Q : Pourquoi DuckDuckGo et pas Google ou Bing ?**
+
+R : DuckDuckGo ne nécessite pas d'API key et n'a pas de quota. Google Custom Search API et Bing Search API sont payants et nécessitent un compte. Pour un projet portfolio qui tourne en local, DuckDuckGo est le choix pragmatique. En production réelle, on utiliserait Tavily (conçu pour les agents LLM, retourne des résultats structurés) ou SerpAPI.
+
+### Architecture de l'agent dans DocuMind
+
+```
+POST /api/v1/agent/ask
+        │
+        ▼
+  AgentRouter (FastAPI)
+        │
+        ▼
+  agent.invoke({question, document_id, _chunk_repo})
+        │
+        ▼
+  [retrieve]  ← ChunkRepository.similarity_search (pgvector, max_distance=0.5)
+        │
+        ├── chunks trouvés ──────────────────────────────────→ [generate]
+        │                                                           │
+        └── rien trouvé → [web_search] (DuckDuckGo, 3 hits) → [generate]
+                                                                    │
+                                                                    ▼
+                                              AskResponse(answer, sources, source_type)
+```
+
+Les sources indiquent leur origine : `"document"` avec numéro de page, ou `"web"` avec l'URL. Le frontend affiche un badge "Web" et des liens cliquables quand la réponse vient du web.
+
+---
+
 ## Étapes 17-18 — Tests unitaires et intégration
 
 **Q : Pourquoi mocker les repositories dans les tests unitaires ?**
