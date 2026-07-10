@@ -364,6 +364,38 @@ Lecture : "donne-moi le 95e percentile de la latence RAG, calculé sur les 5 der
 
 ---
 
+## LangFuse — Observabilité LLM
+
+**Q : Quelle est la différence entre Prometheus/Grafana et LangFuse ?**
+
+R : Prometheus/Grafana surveille l'**infrastructure** — latence HTTP, CPU, mémoire, error rate. Ce sont des métriques système agnostiques au contenu.
+
+LangFuse surveille le **comportement du LLM** — ce que le modèle a reçu en entrée, ce qu'il a généré, combien de tokens il a consommés, est-ce que la réponse était pertinente. C'est de l'observabilité sémantique, pas système.
+
+Les deux sont complémentaires : Prometheus dit "le p95 est à 90s", LangFuse dit "sur les 50 dernières questions, 30% n'ont pas trouvé de contexte dans les docs et sont tombées sur le web".
+
+**Q : Qu'est-ce qu'une trace et une span dans LangFuse ?**
+
+R : Concepts empruntés à l'observabilité distribuée (OpenTelemetry) :
+- **Trace** : représente une requête complète de bout en bout. Dans DocuMind, une trace = une question posée par l'utilisateur jusqu'à la réponse finale.
+- **Span** : une étape à l'intérieur de la trace. Dans notre agent : `retrieve` est une span, `web_search` est une span, `generate` est une span. Chaque span a un début, une fin, une durée, des inputs et outputs.
+
+```
+Trace: "Qu'est-ce que le reinforcement learning ?" (90s)
+  └── Span: retrieve (0.3s) → chunks_found=3
+  └── Span: generate (89s) → answer="..."
+```
+
+**Q : Pourquoi LangFuse est-il configuré en no-op quand les clés API sont absentes ?**
+
+R : Pattern "graceful degradation". Si `LANGFUSE_PUBLIC_KEY` est vide (dev local sans LangFuse configuré, CI, tests), le code continue de fonctionner normalement — `get_langfuse()` retourne `None` et toutes les opérations de tracing sont skippées. Zéro exception, zéro dépendance bloquante. En prod avec les vraies clés, les traces sont envoyées.
+
+**Q : Qu'est-ce que `lf.flush()` et pourquoi l'appeler explicitement ?**
+
+R : LangFuse envoie les traces en **batch asynchrone** pour ne pas bloquer les requêtes. `flush()` force l'envoi immédiat. Dans un contexte web, sans `flush()` la trace pourrait ne jamais être envoyée si le process se termine avant le prochain batch. On l'appelle en fin de requête pour garantir que la trace est enregistrée.
+
+---
+
 ## Étapes 17-18 — Tests unitaires et intégration
 
 **Q : Pourquoi mocker les repositories dans les tests unitaires ?**
