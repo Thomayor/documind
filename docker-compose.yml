@@ -65,8 +65,8 @@ services:
       TRANSFORMERS_OFFLINE: "1"
       HF_HOME: "/root/.cache/huggingface"
       LANGFUSE_HOST: http://langfuse:3000
-      LANGFUSE_PUBLIC_KEY: ""
-      LANGFUSE_SECRET_KEY: ""
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
     depends_on:
       db:
         condition: service_healthy
