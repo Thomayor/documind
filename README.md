@@ -29,11 +29,10 @@ Vos données ne quittent jamais votre machine.
 | **ORM** | SQLAlchemy 2.0 + Alembic | Repository pattern, migrations versionnées |
 | **Frontend** | Next.js 16 + Tailwind v4 | App Router, dark theme, composants React 19 |
 | **Infra** | Docker Compose | Reproductibilité locale, isolation des services |
-| **CI** | GitHub Actions | Lint + tests + build à chaque PR |
-| **CD** | GitHub Actions + GHCR | Build & push image Docker sur merge vers main |
+| **CI/CD** | GitHub Actions + GHCR | Lint + tests sur chaque PR, build & push image sur merge `main` |
 | **Orchestration** | Kubernetes (k3d) + Helm | Déploiement déclaratif, rollback, scaling |
-| **GitOps** | ArgoCD | Sync automatique repo Git → cluster |
-| **Observabilité** | Prometheus + Grafana | Métriques golden signals, alertes latence/error rate |
+| **GitOps** | ArgoCD | Sync automatique repo Git → cluster, rollback déclaratif |
+| **Observabilité** | Prometheus + Grafana | Métriques golden signals (latence p95, error rate), alertes |
 
 ---
 
@@ -148,16 +147,55 @@ docker compose exec backend pytest tests/ -v
 
 ---
 
-## État du projet
+## État du projet — 29 étapes
 
-- [x] Phase 1 — Fondations (Docker, config, DB)
-- [x] Phase 2 — Modèles et persistance
-- [x] Phase 3 — Parsing et ingestion
-- [x] Phase 4 — Pipeline RAG complet
-- [x] Phase 5 — Résumé + historique
-- [x] Phase 6 — Tests (24 tests)
-- [x] Phase 7 — Frontend Next.js
-- [x] Phase 8 — CI GitHub Actions
-- [ ] Phase 9 — Kubernetes + Helm
-- [ ] Phase 10 — GitOps ArgoCD
-- [ ] Phase 11 — Prometheus + Grafana
+### Phase 1 — Fondations
+- [x] Étape 1 — Setup projet · `pyproject.toml` · `uv` · structure des dossiers
+- [x] Étape 2 — Docker · `docker-compose.yml` · PostgreSQL + pgvector · Dockerfile multi-stage
+- [x] Étape 3 — Configuration · Pydantic `BaseSettings` · chargement `.env`
+- [x] Étape 4 — Base de données · SQLAlchemy session · extension pgvector · migrations Alembic
+
+### Phase 2 — Modèles et persistance
+- [x] Étape 5 — Modèles SQLAlchemy · `Document`, `Chunk` (colonne vector), `QueryHistory`
+- [x] Étape 6 — Schémas Pydantic · DTO pattern · séparation schemas API / models ORM
+- [x] Étape 7 — Repository pattern · `BaseRepository` générique · `DocumentRepository` · `ChunkRepository`
+
+### Phase 3 — Parsing et ingestion
+- [x] Étape 8 — Parsers · `BaseParser` (ABC) · PDF (PyMuPDF) · TXT · DOCX
+- [x] Étape 9 — Chunker · `RecursiveChunker` · overlap configurable
+- [x] Étape 10 — Service ingestion · `DocumentService.ingest()` · route `POST /documents`
+
+### Phase 4 — Pipeline RAG
+- [x] Étape 11 — Embedder · Sentence Transformers · `multilingual-e5-base`
+- [x] Étape 12 — Stockage vectoriel · `similarity_search()` · pgvector `<=>` · index HNSW
+- [x] Étape 13 — Générateur LLM · HuggingFace · `Qwen2.5-1.5B-Instruct` · `PromptBuilder`
+- [x] Étape 14 — Service Q&A · pipeline RAG complet · sources avec numéros de page
+
+### Phase 5 — Features avancées
+- [x] Étape 15 — Résumé automatique + extraction de concepts clés
+- [x] Étape 16 — Historique des questions · pagination `limit/offset`
+
+### Phase 6 — Qualité
+- [x] Étape 17 — Tests unitaires · pytest · mocks · fixtures (17 tests)
+- [x] Étape 18 — Tests d'intégration · `httpx.AsyncClient` · DB de test (7 tests)
+- [x] Étape 19 — Logging structuré JSON · middleware FastAPI · gestion des erreurs
+
+### Phase 7 — Frontend Next.js
+- [x] Étape 20 — Setup Next.js 15 · Tailwind · shadcn/ui · connexion API
+- [x] Étape 21 — UI Upload · drag & drop · liste des documents
+- [x] Étape 22 — UI Chat RAG · interface conversationnelle · sources + numéros de page
+
+### Phase 8 — CI/CD GitHub Actions
+- [x] Étape 23 — Pipeline CI · lint (ruff/black) · pytest avec PostgreSQL service container · build Docker
+- [ ] Étape 24 — Pipeline CD · push image GHCR · mise à jour automatique tag Helm
+
+### Phase 9 — Kubernetes avec k3d
+- [ ] Étape 25 — Cluster k3d local · manifestes K8s · Deployment · Service · Ingress · PVC
+- [ ] Étape 26 — Helm chart · `values.yaml` · `helm install`
+
+### Phase 10 — GitOps avec ArgoCD
+- [ ] Étape 27 — Installation ArgoCD · `Application` CRD · sync policy
+- [ ] Étape 28 — Workflow GitOps complet · CD → tag → ArgoCD sync → rollback
+
+### Phase 11 — Observabilité
+- [ ] Étape 29 — Prometheus · métriques FastAPI custom · dashboards Grafana · alertes
